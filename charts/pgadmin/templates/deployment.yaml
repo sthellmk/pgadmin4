@@ -1,0 +1,176 @@
+{{- if or (not .Values.image.tag) (eq .Values.image.tag "latest") }}
+{{- fail "image.tag must be explicit and must not be latest" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pgadmin.name" . }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "pgadmin.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "pgadmin.selector" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.monitoring.enabled }}
+        checksum/monitoring: {{ include (print $.Template.BasePath "/monitoring.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: pgadmin
+          image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: https
+              containerPort: 8443
+          env:
+            - name: PGADMIN_ENABLE_TLS
+              value: "True"
+            - name: PGADMIN_LISTEN_PORT
+              value: "8443"
+            - name: PGADMIN_LISTEN_ADDRESS
+              value: "0.0.0.0"
+            - name: PGADMIN_DISABLE_POSTFIX
+              value: "True"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: HOME
+              value: /var/lib/pgadmin
+            - name: PGADMIN_CUSTOM_CONFIG_DISTRO_FILE
+              value: /etc/pgadmin/config_distro.py
+            - name: PGADMIN_DEFAULT_EMAIL
+              value: {{ .Values.bootstrap.email | quote }}
+            - name: PGADMIN_DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.bootstrap.existingSecret | quote }}
+                  key: {{ .Values.bootstrap.passwordKey | quote }}
+            {{- if .Values.oidc.enabled }}
+            - name: ENTRA_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.existingSecret | quote }}
+                  key: {{ .Values.oidc.clientSecretKey | quote }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /misc/ping
+              port: https
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /misc/ping
+              port: https
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /misc/ping
+              port: https
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/pgadmin
+            - name: tmp
+              mountPath: /tmp
+            - name: run
+              mountPath: /run/pgadmin
+            - name: config
+              mountPath: /etc/pgadmin
+              readOnly: true
+            - name: tls
+              mountPath: /certs
+              readOnly: true
+        {{- if .Values.monitoring.enabled }}
+        - name: blackbox-exporter
+          image: {{ printf "%s:%s" .Values.monitoring.exporter.image.repository .Values.monitoring.exporter.image.tag | quote }}
+          imagePullPolicy: {{ .Values.monitoring.exporter.image.pullPolicy }}
+          args:
+            - --config.file=/etc/blackbox/blackbox.yaml
+            - --web.listen-address=:9115
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: metrics
+              containerPort: 9115
+          readinessProbe:
+            httpGet:
+              path: /-/healthy
+              port: metrics
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: metrics
+          resources:
+            {{- toYaml .Values.monitoring.exporter.resources | nindent 12 }}
+          volumeMounts:
+            - name: exporter-config
+              mountPath: /etc/blackbox
+              readOnly: true
+            - name: service-ca
+              mountPath: /etc/service-ca
+              readOnly: true
+        {{- end }}
+      volumes:
+        {{- if .Values.monitoring.enabled }}
+        - name: exporter-config
+          configMap:
+            name: {{ include "pgadmin.name" . }}-exporter
+            defaultMode: 0440
+        - name: service-ca
+          configMap:
+            name: {{ include "pgadmin.name" . }}-service-ca
+            defaultMode: 0440
+        {{- end }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ default (include "pgadmin.name" .) .Values.persistence.existingClaim | quote }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: run
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: config
+          configMap:
+            name: {{ include "pgadmin.name" . }}
+            defaultMode: 0440
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.servingCertSecretName | quote }}
+            defaultMode: 0440
+            items:
+              - key: tls.crt
+                path: server.cert
+              - key: tls.key
+                path: server.key

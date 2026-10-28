@@ -1,0 +1,58 @@
+# Complete example. Prefer environments/test/values.yaml or environments/prod/values.yaml.
+# All REPLACE values must be replaced before install.
+# Namespace: pass --namespace REPLACE-test-namespace to Helm.
+fullnameOverride: pgadmin-test # Keep stable after installation; also fixes PVC name.
+image:
+  repository: dpage/pgadmin4 # Or REPLACE-internal-registry/path/pgadmin4.
+  tag: "9.18.0" # Explicit reviewed version; internal images must preserve entrypoint.
+  pullPolicy: IfNotPresent
+# Only reference existing Secrets in the installation namespace.
+imagePullSecrets: [] # Example: [{name: REPLACE-image-pull-secret}]
+route:
+  host: REPLACE-pgadmin-test.example.invalid # DNS and ingress certificate must match.
+tls:
+  servingCertSecretName: pgadmin-test-serving-cert # Created by Service CA, not by you.
+persistence:
+  existingClaim: "" # Set existing PVC name to preserve previous data.
+  storageClass: "" # Empty: cluster default. Set appropriate CSI StorageClass.
+  size: 5Gi # Set capacity; ignored when existingClaim is set.
+bootstrap:
+  email: REPLACE-admin@example.invalid # Real deliverable admin email.
+  existingSecret: REPLACE-test-bootstrap-secret # Existing Secret, no password in values.
+  passwordKey: password # Existing key containing bootstrap password.
+oidc:
+  enabled: false # Enable Entra later; false uses internal login and no Entra Secret.
+  tenantId: REPLACE-tenant-id # Single tenant directory UUID, never common.
+  clientId: REPLACE-client-id # Application UUID.
+  existingSecret: REPLACE-test-entra-secret # Existing Secret in same namespace.
+  clientSecretKey: client-secret # Key containing Entra secret VALUE, not secret ID.
+  autoCreateUser: true # Normal users only. False requires prior provisioning.
+  enableInternalLogin: false # Explicit emergency-only opt-in; disable afterwards.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# Requires ServiceMonitor CRD and enabled OpenShift user workload monitoring.
+monitoring:
+  enabled: true # Blackbox exporter: HTTPS availability, latency and certificate metrics.
+  exporter:
+    image:
+      repository: quay.io/prometheus/blackbox-exporter
+      tag: v0.28.0 # Explicit version; internal mirror may be configured.
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+  serviceMonitor:
+    enabled: true # Set false if exporter is scraped by an external configuration.
+    labels: {} # Match your Prometheus serviceMonitorSelector if necessary.
+    interval: 30s
+    scrapeTimeout: 10s # Must exceed the exporter probe timeout of 5s.

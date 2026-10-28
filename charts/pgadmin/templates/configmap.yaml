@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pgadmin.name" . }}
+data:
+  config_distro.py: |
+    import os
+    SERVER_MODE = True
+    CA_FILE = '/etc/ssl/certs/ca-certificates.crt'
+    LOG_FILE = '/dev/null'
+    HELP_PATH = '../../docs'
+    DEFAULT_BINARY_PATHS = {'pg': '/usr/local/pgsql-18'}
+    DATA_DIR = '/var/lib/pgadmin'
+    SQLITE_PATH = DATA_DIR + '/pgadmin4.db'
+    SESSION_DB_PATH = DATA_DIR + '/sessions'
+    STORAGE_DIR = DATA_DIR + '/storage'
+    KERBEROS_CCACHE_DIR = DATA_DIR + '/krbccache'
+    AZURE_CREDENTIAL_CACHE_DIR = DATA_DIR + '/azurecredentialcache'
+    {{- if .Values.oidc.enabled }}
+    AUTHENTICATION_SOURCES = ['oauth2'{{ if .Values.oidc.enableInternalLogin }}, 'internal'{{ end }}]
+    OAUTH2_AUTO_CREATE_USER = {{ ternary "True" "False" .Values.oidc.autoCreateUser }}
+    OAUTH2_CONFIG = [{
+        'OAUTH2_NAME': 'entra',
+        'OAUTH2_DISPLAY_NAME': 'Microsoft Entra ID',
+        'OAUTH2_CLIENT_ID': {{ .Values.oidc.clientId | toJson }},
+        'OAUTH2_CLIENT_SECRET': os.environ['ENTRA_CLIENT_SECRET'],
+        'OAUTH2_SERVER_METADATA_URL': {{ printf "https://login.microsoftonline.com/%s/v2.0/.well-known/openid-configuration" .Values.oidc.tenantId | toJson }},
+        'OAUTH2_SCOPE': 'openid profile email',
+        'OAUTH2_RESPONSE_TYPE': 'code',
+        'OAUTH2_SSL_CERT_VERIFICATION': True,
+        'OAUTH2_ICON': 'fa-microsoft',
+        'OAUTH2_BUTTON_COLOR': '#0078d4',
+    }]
+    {{- else }}
+    AUTHENTICATION_SOURCES = ['internal']
+    OAUTH2_AUTO_CREATE_USER = False
+    OAUTH2_CONFIG = []
+    {{- end }}
+    PREFERRED_URL_SCHEME = 'https'
+    SESSION_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    REMEMBER_COOKIE_SECURE = True
+    REMEMBER_COOKIE_HTTPONLY = True
+    PROXY_X_FOR_COUNT = 1
+    PROXY_X_PROTO_COUNT = 1
+    PROXY_X_HOST_COUNT = 0
+    PROXY_X_PORT_COUNT = 0
+    PROXY_X_PREFIX_COUNT = 0
+    MASTER_PASSWORD_REQUIRED = True

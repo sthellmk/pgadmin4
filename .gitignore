@@ -1,0 +1,4 @@
+.validation/
+values.local.yaml
+__pycache__/
+pgadmin4.zip

@@ -1,0 +1,80 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pgadmin.name" . }}-service-ca
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+# Filled by the Service CA controller, never a static CA in Git.
+data: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pgadmin.name" . }}-exporter
+data:
+  blackbox.yaml: |
+    modules:
+      pgadmin_https:
+        prober: http
+        timeout: 5s
+        http:
+          method: GET
+          valid_status_codes: [200]
+          follow_redirects: false
+          preferred_ip_protocol: ip4
+          fail_if_not_ssl: true
+          tls_config:
+            ca_file: /etc/service-ca/service-ca.crt
+            insecure_skip_verify: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pgadmin.name" . }}-metrics
+  labels:
+    {{- include "pgadmin.selector" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "pgadmin.selector" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 9115
+      targetPort: metrics
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "pgadmin.name" . }}
+  {{- with .Values.monitoring.serviceMonitor.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "pgadmin.selector" . | nindent 6 }}
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: metrics
+      scheme: http
+      path: /probe
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+      params:
+        module: [pgadmin_https]
+        target:
+          - {{ printf "https://%s.%s.svc/misc/ping" (include "pgadmin.name" .) .Release.Namespace | quote }}
+      relabelings:
+        - targetLabel: instance
+          replacement: {{ printf "https://%s.%s.svc/misc/ping" (include "pgadmin.name" .) .Release.Namespace | quote }}
+    - port: metrics
+      scheme: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+{{- end }}
+{{- end }}

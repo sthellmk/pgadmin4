@@ -1,0 +1,2 @@
+# Intentionally empty. Select a complete environment with -f environments/<test|prod>/values.yaml.
+{}
